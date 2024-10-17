@@ -1,0 +1,424 @@
+<html><head><base href="https://zenai.recruiting.dashboard/" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZEN AI Interactive Recruiting Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+<style>
+  body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
+  #app { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: auto auto 1fr 1fr; gap: 10px; height: 100vh; padding: 10px; box-sizing: border-box; }
+  .header, .ai-input, .file-upload { grid-column: 1 / -1; }
+  .header { display: flex; justify-content: space-between; align-items: center; }
+  .card { background: #f0f0f0; border-radius: 5px; padding: 10px; overflow-y: auto; }
+  h2 { margin-top: 0; font-size: 1em; }
+  ul { list-style-type: none; padding: 0; margin: 0; }
+  li { margin-bottom: 5px; font-size: 0.9em; }
+  .chart-container { height: 100%; width: 100%; }
+  input, textarea { width: 100%; margin-bottom: 5px; }
+  button { cursor: pointer; }
+  .file-upload { display: flex; justify-content: space-between; align-items: center; }
+  .file-upload input[type="file"] { display: none; }
+  .file-upload label { cursor: pointer; background: #007bff; color: white; padding: 5px 10px; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h1>ZEN AI Interactive Recruiting Dashboard</h1>
+    <span>{{ currentDate }}</span>
+  </div>
+
+  <div class="file-upload card">
+    <h2>Upload Documents</h2>
+    <label for="file-upload">Choose File</label>
+    <input id="file-upload" type="file" @change="handleFileUpload" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx">
+    <span>{{ uploadStatus }}</span>
+  </div>
+
+  <div class="ai-input card">
+    <h2>AI Integration</h2>
+    <input v-model="apiKey" type="password" placeholder="Enter AI API Key">
+    <textarea v-model="aiPrompt" placeholder="Enter AI prompt for insights"></textarea>
+    <button @click="getAIInsights">Get AI Insights</button>
+  </div>
+  
+  <div class="card">
+    <h2>Job Openings</h2>
+    <div class="chart-container">
+      <canvas id="jobOpeningsChart"></canvas>
+    </div>
+    <input v-model="newJobOpening" placeholder="Add new job opening">
+    <button @click="addJobOpening">Add</button>
+  </div>
+  
+  <div class="card">
+    <h2>Candidate Pipeline</h2>
+    <div class="chart-container">
+      <canvas id="candidatePipelineChart"></canvas>
+    </div>
+    <input v-model="newCandidate" placeholder="Add new candidate">
+    <select v-model="newCandidateStage">
+      <option value="Applied">Applied</option>
+      <option value="Screening">Screening</option>
+      <option value="Interview">Interview</option>
+      <option value="Offer">Offer</option>
+    </select>
+    <button @click="addCandidate">Add</button>
+  </div>
+  
+  <div class="card">
+    <h2>Recent Applications</h2>
+    <ul>
+      <li v-for="app in recentApplications">{{ app.name }} - {{ app.position }}</li>
+    </ul>
+    <input v-model="newApplicant" placeholder="Add new applicant">
+    <input v-model="newPosition" placeholder="Position applied for">
+    <button @click="addApplication">Add</button>
+  </div>
+  
+  <div class="card">
+    <h2>Upcoming Interviews</h2>
+    <ul>
+      <li v-for="int in upcomingInterviews">{{ int.candidate }} - {{ int.datetime }}</li>
+    </ul>
+    <input v-model="newInterviewCandidate" placeholder="Candidate name">
+    <input v-model="newInterviewDateTime" type="datetime-local">
+    <button @click="addInterview">Schedule</button>
+  </div>
+  
+  <div class="card">
+    <h2>Tasks</h2>
+    <ul>
+      <li v-for="task in tasks">
+        {{ task.title }}
+        <button @click="completeTask(task.id)" style="float: right;">✓</button>
+      </li>
+    </ul>
+    <input v-model="newTask" placeholder="Add new task">
+    <button @click="addTask">Add</button>
+  </div>
+  
+  <div class="card">
+    <h2>AI Insights</h2>
+    <div v-html="aiInsights"></div>
+  </div>
+  
+  <div class="card">
+    <h2>AI-Powered Features</h2>
+    <button @click="automateTasksWithAI">Automate Tasks</button>
+    <button @click="rankCandidatesWithAI">Rank Candidates</button>
+    <button @click="generateInterviewQuestions(newInterviewCandidate, newPosition)">Generate Interview Questions</button>
+    <button @click="generateJobDescription">Generate Job Description</button>
+    <button @click="suggestCandidateScreeningQuestions">Suggest Screening Questions</button>
+    <button @click="analyzeRecruitmentMetrics">Analyze Recruitment Metrics</button>
+  </div>
+</div>
+
+<script>
+new Vue({
+  el: '#app',
+  data: {
+    currentDate: new Date().toLocaleDateString(),
+    apiKey: '',
+    aiPrompt: '',
+    aiInsights: '',
+    candidateRankings: [],
+    recentApplications: [],
+    upcomingInterviews: [],
+    tasks: [],
+    jobOpeningsData: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+    candidatePipelineData: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+    newJobOpening: '',
+    newCandidate: '',
+    newCandidateStage: 'Applied',
+    newApplicant: '',
+    newPosition: '',
+    newInterviewCandidate: '',
+    newInterviewDateTime: '',
+    newTask: '',
+    uploadStatus: 'No file chosen',
+    aiModel: 'gpt-3.5-turbo',
+    aiTemperature: 0.7,
+    aiMaxTokens: 150
+  },
+  mounted() {
+    this.fetchDashboardData();
+  },
+  methods: {
+    async fetchDashboardData() {
+      this.recentApplications = [
+        { name: 'John Doe', position: 'Software Engineer' },
+        { name: 'Jane Smith', position: 'Data Scientist' }
+      ];
+      this.upcomingInterviews = [
+        { candidate: 'Alice Johnson', datetime: '2023-06-15 10:00 AM' },
+        { candidate: 'Bob Williams', datetime: '2023-06-16 2:00 PM' }
+      ];
+      this.tasks = [
+        { id: 1, title: 'Review resumes' },
+        { id: 2, title: 'Prepare interview questions' }
+      ];
+      this.jobOpeningsData = {
+        labels: ['Software Engineer', 'Data Scientist', 'Product Manager'],
+        datasets: [{ data: [5, 3, 2], backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56'] }]
+      };
+      this.candidatePipelineData = {
+        labels: ['Applied', 'Screening', 'Interview', 'Offer'],
+        datasets: [{ data: [50, 30, 15, 5], backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'] }]
+      };
+      this.renderCharts();
+    },
+    renderCharts() {
+      this.renderJobOpeningsChart();
+      this.renderCandidatePipelineChart();
+    },
+    renderJobOpeningsChart() {
+      const ctx = document.getElementById('jobOpeningsChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'doughnut',
+        data: this.jobOpeningsData,
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+    },
+    renderCandidatePipelineChart() {
+      const ctx = document.getElementById('candidatePipelineChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: this.candidatePipelineData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    },
+    completeTask(taskId) {
+      this.tasks = this.tasks.filter(task => task.id !== taskId);
+    },
+    addJobOpening() {
+      if (this.newJobOpening) {
+        this.jobOpeningsData.labels.push(this.newJobOpening);
+        this.jobOpeningsData.datasets[0].data.push(1);
+        this.jobOpeningsData.datasets[0].backgroundColor.push(this.getRandomColor());
+        this.renderJobOpeningsChart();
+        this.newJobOpening = '';
+      }
+    },
+    addCandidate() {
+      if (this.newCandidate && this.newCandidateStage) {
+        const index = this.candidatePipelineData.labels.indexOf(this.newCandidateStage);
+        this.candidatePipelineData.datasets[0].data[index]++;
+        this.renderCandidatePipelineChart();
+        this.newCandidate = '';
+        this.newCandidateStage = 'Applied';
+      }
+    },
+    addApplication() {
+      if (this.newApplicant && this.newPosition) {
+        this.recentApplications.unshift({ name: this.newApplicant, position: this.newPosition });
+        this.newApplicant = '';
+        this.newPosition = '';
+      }
+    },
+    addInterview() {
+      if (this.newInterviewCandidate && this.newInterviewDateTime) {
+        this.upcomingInterviews.push({ candidate: this.newInterviewCandidate, datetime: this.newInterviewDateTime });
+        this.newInterviewCandidate = '';
+        this.newInterviewDateTime = '';
+      }
+    },
+    addTask() {
+      if (this.newTask) {
+        this.tasks.push({ id: Date.now(), title: this.newTask });
+        this.newTask = '';
+      }
+    },
+    getRandomColor() {
+      return '#' + Math.floor(Math.random()*16777215).toString(16);
+    },
+    async getAIInsights() {
+      if (!this.apiKey || !this.aiPrompt) {
+        this.showError('Please enter both API key and prompt');
+        return;
+      }
+      try {
+        this.aiInsights = await this.makeAIApiCall(this.aiPrompt);
+      } catch (error) {
+        this.showError('Error fetching AI insights. Please try again.');
+      }
+    },
+    async makeAIApiCall(prompt) {
+      if (!this.apiKey) {
+        throw new Error('API key is not set');
+      }
+
+      try {
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: this.aiModel,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: this.aiTemperature,
+          max_tokens: this.aiMaxTokens,
+        }, {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        return response.data.choices[0].message.content;
+      } catch (error) {
+        console.error('Error making AI API call:', error);
+        throw error;
+      }
+    },
+    async generateJobDescription() {
+      const prompt = `Generate a job description for a ${this.newJobOpening} position.`;
+      const response = await this.makeAIApiCall(prompt);
+      this.aiInsights += `<h4>Generated Job Description for ${this.newJobOpening}:</h4><p>${response}</p>`;
+    },
+    async suggestCandidateScreeningQuestions() {
+      const prompt = `Suggest 5 screening questions for a ${this.newPosition} candidate.`;
+      const response = await this.makeAIApiCall(prompt);
+      this.aiInsights += `<h4>Suggested Screening Questions for ${this.newPosition}:</h4><p>${response}</p>`;
+    },
+    async analyzeRecruitmentMetrics() {
+      const prompt = `Analyze the following recruitment metrics and provide insights:
+        Job Openings: ${JSON.stringify(this.jobOpeningsData)}
+        Candidate Pipeline: ${JSON.stringify(this.candidatePipelineData)}`;
+      const response = await this.makeAIApiCall(prompt);
+      this.aiInsights += `<h4>Recruitment Metrics Analysis:</h4><p>${response}</p>`;
+    },
+    async automateTasksWithAI() {
+      const taskPrompt = `Given the following tasks: ${JSON.stringify(this.tasks)}, suggest ways to automate or optimize these tasks for a recruiting director.`;
+      try {
+        const response = await this.makeAIApiCall(taskPrompt);
+        this.aiInsights += `<h4>Task Automation Suggestions:</h4><p>${response}</p>`;
+      } catch (error) {
+        console.error('Error automating tasks:', error);
+      }
+    },
+    async rankCandidatesWithAI() {
+      const rankingPrompt = `Given the following candidates: ${JSON.stringify(this.recentApplications)}, rank them based on their suitability for the positions they applied for. Consider factors like experience, skills, and potential cultural fit.`;
+      try {
+        const response = await this.makeAIApiCall(rankingPrompt);
+        this.candidateRankings = JSON.parse(response);
+        this.renderCandidateRankings();
+      } catch (error) {
+        console.error('Error ranking candidates:', error);
+      }
+    },
+    renderCandidateRankings() {
+      const rankingsHtml = this.candidateRankings.map((ranking, index) => 
+        `<li>${index + 1}. ${ranking.name} - ${ranking.position} (Score: ${ranking.score})</li>`
+      ).join('');
+      this.aiInsights += `<h4>AI-Powered Candidate Rankings:</h4><ol>${rankingsHtml}</ol>`;
+    },
+    async generateInterviewQuestions(candidate, position) {
+      const questionPrompt = `Generate 5 tailored interview questions for a ${position} candidate named ${candidate}.`;
+      try {
+        const response = await this.makeAIApiCall(questionPrompt);
+        this.aiInsights += `<h4>AI-Generated Interview Questions for ${candidate} (${position}):</h4>${response}`;
+      } catch (error) {
+        console.error('Error generating interview questions:', error);
+      }
+    },
+    async handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      this.uploadStatus = 'Uploading...';
+      
+      try {
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        let parsedData;
+        
+        if (['xlsx', 'xls', 'csv'].includes(fileExtension)) {
+          parsedData = await this.parseSpreadsheet(file);
+        } else if (fileExtension === 'pdf') {
+          parsedData = await this.parsePDF(file);
+        } else if (['doc', 'docx'].includes(fileExtension)) {
+          parsedData = await this.parseWord(file);
+        } else {
+          throw new Error('Unsupported file format');
+        }
+        
+        await this.enhanceDocumentParsingWithAI(parsedData);
+        this.uploadStatus = 'File uploaded and processed successfully';
+      } catch (error) {
+        console.error('Error processing file:', error);
+        this.uploadStatus = 'Error processing file. Please try again.';
+      }
+    },
+    async parseSpreadsheet(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, {type: 'array'});
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const parsedData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+          resolve(parsedData);
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
+      });
+    },
+    async parsePDF(file) {
+      const reader = new FileReader();
+      return new Promise((resolve, reject) => {
+        reader.onload = async (event) => {
+          const typedArray = new Uint8Array(event.target.result);
+          try {
+            const pdf = await pdfjsLib.getDocument(typedArray).promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const textContent = await page.getTextContent();
+              fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+            }
+            resolve(fullText);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
+      });
+    },
+    async parseWord(file) {
+      return new Promise((resolve) => {
+        resolve("Word document parsing is not implemented in this demo. It typically requires server-side processing.");
+      });
+    },
+    processData(parsedData) {
+      if (Array.isArray(parsedData)) {
+        parsedData.forEach((row, index) => {
+          if (index === 0) return;
+          if (row.length >= 2) {
+            this.addApplication(row[0], row[1]);
+          }
+          if (row.length >= 3) {
+            this.tasks.push({ id: Date.now(), title: row[2] });
+          }
+        });
+      } else if (typeof parsedData === 'string') {
+        this.tasks.push({ id: Date.now(), title: 'Review uploaded PDF content' });
+      }
+      
+      this.renderCharts();
+    },
+    addApplication(name, position) {
+      if (name && position) {
+        this.recentApplications.unshift({ name, position });
+      }
+    },
+    showError(message) {
+      alert(message);
+    }
+  }
+});
+</script>
+</body></html>
